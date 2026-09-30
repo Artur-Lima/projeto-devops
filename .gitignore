@@ -1,0 +1,15 @@
+# Segredos — nunca versionar
+.env
+*.pem
+*.key
+acme.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Sistema
+.DS_Store
