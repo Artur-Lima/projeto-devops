@@ -49,6 +49,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Data do build
+        id: data
+        run: echo "agora=$(date -u '+%d/%m/%Y %H:%M UTC')" >> "$GITHUB_OUTPUT"
+
       - name: Build e push
         uses: docker/build-push-action@v6
         with:
@@ -59,30 +63,38 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.repo.outputs.name }}:${{ github.sha }}
           build-args: |
             COMMIT_SHA=${{ github.sha }}
-            BUILD_TIME=${{ github.run_started_at }}
+            BUILD_TIME=${{ steps.data.outputs.agora }}
 
-  # 3) DEPLOY — atualiza o serviço no cluster Docker Swarm via SSH
+  # 3) DEPLOY — dispara o webhook do Portainer, que puxa a imagem nova
+  #    do GHCR e atualiza o serviço no cluster Docker Swarm.
   deploy:
     name: Deploy no Swarm
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Atualizar o serviço no cluster
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          script: |
-            set -e
-            IMAGE="ghcr.io/artur-lima/projeto-devops:${{ github.sha }}"
-            echo "Atualizando para $IMAGE"
-            docker service update \
-              --image "$IMAGE" \
-              --with-registry-auth \
-              --update-order start-first \
-              projeto-devops_app
-            docker service ps projeto-devops_app --no-trunc
-      - name: Resumo
-        run: echo "Deploy aplicado em devops.cyberselva.com"
+      - name: Disparar webhook do Portainer
+        run: |
+          set -e
+          echo "Disparando deploy do commit ${GITHUB_SHA::7}"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${{ secrets.PORTAINER_WEBHOOK }}")
+          echo "Portainer respondeu HTTP $STATUS"
+          if [ "$STATUS" != "204" ] && [ "$STATUS" != "200" ]; then
+            echo "Deploy falhou"
+            exit 1
+          fi
+
+      - name: Aguardar o serviço responder com o novo commit
+        run: |
+          set -e
+          ESPERADO="${GITHUB_SHA::7}"
+          for i in $(seq 1 30); do
+            ATUAL=$(curl -s https://arturdevops.duckdns.org/health | grep -o '"commit":"[^"]*"' | cut -d'"' -f4 || true)
+            echo "tentativa $i — em produção: ${ATUAL:-indisponível} | esperado: $ESPERADO"
+            if [ "$ATUAL" = "$ESPERADO" ]; then
+              echo "Deploy confirmado em produção"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "O serviço não respondeu com o commit novo dentro do tempo limite"
+          exit 1
