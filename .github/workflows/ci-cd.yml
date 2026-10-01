@@ -61,13 +61,13 @@ jobs:
             COMMIT_SHA=${{ github.sha }}
             BUILD_TIME=${{ github.run_started_at }}
 
-  # 3) DEPLOY — atualiza o ambiente de produção na VPS via SSH
+  # 3) DEPLOY — atualiza o serviço no cluster Docker Swarm via SSH
   deploy:
-    name: Deploy na VPS
+    name: Deploy no Swarm
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Atualizar containers no servidor
+      - name: Atualizar o serviço no cluster
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -76,9 +76,13 @@ jobs:
           port: ${{ secrets.VPS_PORT }}
           script: |
             set -e
-            cd ~/projeto-devops
-            git pull origin main
-            docker compose pull
-            docker compose up -d
-            docker image prune -f
-            docker compose ps
+            IMAGE="ghcr.io/artur-lima/projeto-devops:${{ github.sha }}"
+            echo "Atualizando para $IMAGE"
+            docker service update \
+              --image "$IMAGE" \
+              --with-registry-auth \
+              --update-order start-first \
+              projeto-devops_app
+            docker service ps projeto-devops_app --no-trunc
+      - name: Resumo
+        run: echo "Deploy aplicado em devops.cyberselva.com"
