@@ -1,62 +1,74 @@
 # Projeto Integrador — Cloud Computing e DevOps
 
-Aplicação web containerizada, publicada em nuvem com domínio próprio, HTTPS válido, pipeline de CI/CD automatizada e monitoramento de disponibilidade.
+Aplicação web containerizada, publicada em cluster Docker Swarm, com domínio próprio, HTTPS válido, pipeline de CI/CD automatizada e monitoramento de disponibilidade.
 
-- **Aplicação:** https://devops.seudominio.com.br
-- **Status page:** https://status.seudominio.com.br/status/projeto
-- **Pipeline:** aba **Actions** deste repositório
-
-> Substitua os domínios acima pelos reais antes de enviar o repositório.
+| Recurso | Endereço |
+|---|---|
+| Aplicação | https://arturdevops.duckdns.org |
+| Health check | https://arturdevops.duckdns.org/health |
+| Status page | https://arturdevopsstatus.duckdns.org/status/projeto |
+| Repositório | https://github.com/Artur-Lima/projeto-devops |
+| Pipeline | https://github.com/Artur-Lima/projeto-devops/actions |
+| Imagem | ghcr.io/artur-lima/projeto-devops |
 
 ---
 
 ## 1. Descrição da aplicação
 
-Aplicação web em Python/Flask que exibe na página inicial a disciplina e o nome completo de todos os integrantes do grupo. O rodapé mostra o hash do commit e a data do build que estão em produção naquele momento — é a forma de verificar, sem screenshot, que a pipeline realmente levou o código até o ar.
+Aplicação web em Python/Flask que exibe na página inicial a disciplina e o nome completo dos integrantes do grupo. O rodapé mostra o hash do commit e a data do build que estão em produção naquele instante — é assim que se verifica, sem screenshot, qual versão do repositório está no ar.
 
-Rotas:
+| Rota | Função |
+|---|---|
+| `/` | Página inicial com disciplina e integrantes |
+| `/health` | Retorna `{"status":"ok","commit":"...","build":"..."}` |
 
-| Rota      | Função |
-|-----------|--------|
-| `/`       | Página inicial com disciplina e integrantes |
-| `/health` | Retorna `{"status":"ok"}` — usado pelo healthcheck do Docker, pelo teste da pipeline e pelo Uptime Kuma |
+O `/health` tem três usos simultâneos: healthcheck do Docker, validação automática da pipeline após o deploy e monitor do Uptime Kuma.
 
 ## 2. Arquitetura do ambiente
 
 ```
-                        ┌──────────────────── VPS (Ubuntu 24.04) ────────────────────┐
-                        │                                                            │
-Usuário                 │   UFW: 22, 80, 443                                         │
-   │                    │        │                                                   │
-   ▼                    │        ▼                                                   │
- DNS (registro A)  ────► │   ┌─────────┐   rede interna "web"    ┌──────────────┐     │
- devops.dominio.com.br  │   │ Traefik │ ─────────────────────► │ app :8000    │     │
-        │               │   │ :80/:443│                        │ (Flask +      │     │
-        ▼               │   │  TLS    │ ─────────────────────► │  gunicorn)    │     │
-   IP da VPS            │   └─────────┘                        └──────────────┘     │
-                        │        │                              ┌──────────────┐     │
-                        │        └────────────────────────────► │ uptime-kuma  │     │
-                        │                                       │ :3001        │     │
-                        │                                       └──────────────┘     │
-                        └────────────────────────────────────────────────────────────┘
+                    ┌──────────── VPS Hostinger — 31.97.172.33 ────────────┐
+                    │              Docker Swarm (2 nós)                    │
+Usuário             │                                                      │
+   │                │   portas publicadas no host: 80, 443 (só o Traefik)  │
+   ▼                │        │                                             │
+ DNS (DuckDNS)      │        ▼                                             │
+ arturdevops ──────►│   ┌─────────┐   rede overlay      ┌────────────────┐ │
+ .duckdns.org       │   │ Traefik │   traefik_public    │ app (2 réplicas)│ │
+        │           │   │ :80/:443├────────────────────►│ gunicorn :8000 │ │
+        ▼           │   │  TLS    │                     └────────────────┘ │
+ 31.97.172.33       │   │         │                     ┌────────────────┐ │
+                    │   └─────────┴────────────────────►│ uptime-kuma    │ │
+                    │                                   │ :3001          │ │
+                    │                                   └────────────────┘ │
+                    └──────────────────────────────────────────────────────┘
 
 Fluxo de entrega:
-git push → GitHub Actions (teste → build → push GHCR) → SSH na VPS → docker compose pull && up -d
+git push → GitHub Actions (teste → build → push GHCR) → webhook Portainer
+         → Swarm puxa a imagem → rolling update → validação automática no /health
 ```
 
-Somente o Traefik publica portas no host. A aplicação e o Uptime Kuma são alcançáveis apenas pela rede interna do Docker.
+Componentes:
+
+- **DNS** traduz o nome para o IP da VPS.
+- **Traefik** é o reverse proxy: é o único serviço que publica portas no host, termina o TLS e roteia pelo cabeçalho `Host` até o container certo.
+- **Rede overlay `traefik_public`** liga o Traefik aos serviços; a aplicação não é alcançável de fora por outro caminho.
+- **Swarm** mantém o número de réplicas desejado e reinicia o que cair.
+- **Portainer** é a interface de administração do cluster e expõe o webhook usado pelo deploy.
 
 ## 3. Tecnologias utilizadas
 
 | Camada | Tecnologia |
 |---|---|
 | Aplicação | Python 3.12, Flask, Gunicorn |
-| Containerização | Docker, Docker Compose (build multi-stage) |
-| Reverse proxy / TLS | Traefik v3 + Let's Encrypt (ACME HTTP-01) |
-| Cloud | VPS Linux |
-| CI/CD | GitHub Actions + GitHub Container Registry (GHCR) |
-| Monitoramento | Uptime Kuma |
-| Segurança | UFW, SSH por chave, segredos em `.env` e GitHub Secrets |
+| Containerização | Docker, build multi-stage, usuário não-root |
+| Orquestração | Docker Swarm (2 nós), administrado via Portainer CE 2.33 |
+| Reverse proxy / TLS | Traefik v3 + Let's Encrypt (resolver `letsencrypt`) |
+| Cloud | VPS Hostinger (AS47583) |
+| DNS | DuckDNS |
+| Registro de imagens | GitHub Container Registry (GHCR) |
+| CI/CD | GitHub Actions + webhook de serviço do Portainer |
+| Monitoramento | Uptime Kuma com status page pública |
 
 ## 4. Estrutura do projeto
 
@@ -66,9 +78,10 @@ Somente o Traefik publica portas no host. A aplicação e o Uptime Kuma são alc
 ├── templates/index.html        # Página inicial
 ├── test_app.py                 # Testes executados pela pipeline
 ├── requirements.txt
-├── Dockerfile                  # Build multi-stage, usuário não-root, healthcheck
-├── docker-compose.yml          # app + traefik + uptime-kuma
-├── .env.example                # Modelo de variáveis (o .env real não é versionado)
+├── Dockerfile                  # Build multi-stage, não-root, healthcheck
+├── stack-swarm.yml             # Stack de produção (Docker Swarm)
+├── docker-compose.yml          # Ambiente alternativo de host único
+├── .env.example                # Modelo de variáveis (.env real não versionado)
 ├── .gitignore
 ├── RUNBOOK.md                  # Diagnóstico e recuperação
 └── .github/workflows/ci-cd.yml # Pipeline
@@ -78,104 +91,107 @@ Somente o Traefik publica portas no host. A aplicação e o Uptime Kuma são alc
 
 | Item | Valor |
 |---|---|
-| Provedor | *(preencher)* |
-| Sistema operacional | Ubuntu Server 24.04 LTS |
-| Recursos | *(vCPU / RAM / disco)* |
-| IP público | *(preencher)* |
-| Portas abertas | 22 (SSH), 80 (HTTP → redirect), 443 (HTTPS) |
-| Forma de acesso | SSH com chave pública: `ssh -i ~/.ssh/chave usuario@IP` |
+| Provedor | Hostinger (VPS) |
+| Sistema operacional | Linux (Ubuntu Server) |
+| Orquestração | Docker Swarm, 2 nós; serviços fixados no nó `srv1230142` |
+| IP público | 31.97.172.33 |
+| Portas publicadas | 80 (HTTP, redireciona) e 443 (HTTPS) — ambas apenas pelo Traefik |
+| Portas da aplicação | 8000 (app) e 3001 (Uptime Kuma), acessíveis somente pela rede overlay interna |
+| Forma de acesso | Portainer em https://portainer.cyberselva.com, autenticado |
 
-**Por que VPS:** controle total do sistema operacional, Docker nativo sem camada de abstração de serviço gerenciado, custo previsível e permanência garantida até a N2.
+**Por que VPS com Swarm:** infraestrutura já existente e sob controle próprio, com orquestração que garante réplicas e reinício automático, custo previsível e disponibilidade garantida até a N2 — sem depender de crédito promocional de free tier.
 
 ## 6. Processo de instalação
 
+A stack é criada no Portainer a partir do `stack-swarm.yml`:
+
+1. Portainer → **Stacks** → **Add stack**
+2. Name: `projeto-devops`, Build method: **Web editor**
+3. Colar o conteúdo de `stack-swarm.yml`
+4. **Deploy the stack**
+
+Equivalente por linha de comando, em um nó manager:
+
 ```bash
-# Na VPS, como usuário comum com sudo
-sudo apt update && sudo apt install -y docker.io docker-compose-v2 git ufw
-sudo usermod -aG docker $USER && newgrp docker
-
-# Firewall
-sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
-sudo ufw enable
-
-# Projeto
-git clone https://github.com/SEU-USUARIO/projeto-devops.git ~/projeto-devops
-cd ~/projeto-devops
-cp .env.example .env && nano .env      # preencher domínios, imagem e e-mail
-docker compose up -d
+docker stack deploy -c stack-swarm.yml projeto-devops
+docker service ls | grep projeto-devops
 ```
+
+Pré-requisitos já presentes no cluster: Docker Swarm inicializado, rede overlay externa `traefik_public` e Traefik com o resolver `letsencrypt` configurado.
 
 ## 7. Processo de deploy
 
-Deploy automático a cada push na branch `main`:
+Automático a cada push na branch `main`:
 
-1. `test` — instala dependências e roda o pytest. Se falhar, nada segue adiante.
-2. `build` — constrói a imagem e publica no GHCR com duas tags: `latest` e o SHA do commit.
-3. `deploy` — conecta na VPS por SSH, faz `git pull`, `docker compose pull` e `docker compose up -d`.
+1. **test** — instala dependências e roda o pytest. Falhou, nada segue adiante.
+2. **build** — constrói a imagem e publica no GHCR com duas tags: `latest` e o SHA do commit. O SHA e a data entram na imagem como build args e aparecem no rodapé da página.
+3. **deploy** — dispara o webhook do Portainer, que faz o Swarm puxar a imagem nova e aplicar rolling update com `start-first`. Em seguida a própria pipeline consulta o `/health` em loop até o commit em produção bater com o commit do push; se não bater em 5 minutos, o job falha.
 
-Verificação: o rodapé da página passa a exibir o novo hash de commit.
+Esse último passo é o que torna o deploy verificável: a pipeline só fica verde se a alteração realmente chegou ao ar.
 
 Deploy manual, se necessário:
 
 ```bash
-cd ~/projeto-devops && git pull && docker compose pull && docker compose up -d
+docker service update --image ghcr.io/artur-lima/projeto-devops:latest \
+  --with-registry-auth --update-order start-first projeto-devops_app
 ```
 
 ## 8. Configuração do Docker
 
-`Dockerfile` em dois estágios: o primeiro instala as dependências, o segundo copia apenas o resultado e o código, o que reduz o tamanho da imagem. O container roda com usuário `appuser` (UID 10001), sem privilégios de root, e possui `HEALTHCHECK` batendo em `/health` a cada 30s.
+`Dockerfile` em dois estágios: o primeiro instala as dependências, o segundo copia apenas o resultado e o código-fonte, o que reduz o tamanho da imagem e a superfície de ataque. O processo roda como `appuser` (UID 10001), sem privilégios de root, e há `HEALTHCHECK` consultando `/health` a cada 30s.
 
-O `docker-compose.yml` orquestra três serviços na rede `web`, todos com `restart: unless-stopped`. Apenas o Traefik mapeia portas para o host. O socket do Docker é montado somente leitura.
+Na stack, a aplicação sobe com **2 réplicas** e `update_config: order: start-first` — a réplica nova entra em serviço antes da antiga sair, então o deploy não derruba o site.
 
-Diferença fundamental: **Dockerfile** é a receita, **imagem** é o pacote imutável gerado a partir dela, **container** é a instância em execução da imagem. Remover o container não apaga a imagem; dados que precisam sobreviver ficam em volumes (`traefik_certs`, `kuma_data`).
+Conceitos:
+
+- **Dockerfile** é a receita.
+- **Imagem** é o pacote imutável gerado a partir dela, versionado no GHCR por SHA de commit.
+- **Container** é a instância em execução; no Swarm cada container é uma *task* de um *service*.
+- Remover um container não apaga a imagem nem os volumes nomeados; o Swarm recria a task automaticamente para manter as réplicas.
 
 ## 9. Configuração do DNS
 
-Registros no painel do domínio:
+Dois subdomínios no DuckDNS apontando para o IP da VPS:
 
-| Tipo | Nome | Valor | Proxy |
-|---|---|---|---|
-| A | `devops` | IP da VPS | desligado (DNS only) |
-| A | `status` | IP da VPS | desligado (DNS only) |
+| Domínio | Tipo | Valor |
+|---|---|---|
+| `arturdevops.duckdns.org` | A | 31.97.172.33 |
+| `arturdevopsstatus.duckdns.org` | A | 31.97.172.33 |
 
-Caminho: o navegador consulta o resolver → chega ao servidor autoritativo do domínio → recebe o IP da VPS → abre conexão TCP na porta 443 → o Traefik lê o cabeçalho `Host` e encaminha ao container correspondente.
+Caminho percorrido: o navegador consulta o resolver → o resolver chega aos servidores autoritativos do DuckDNS → recebe 31.97.172.33 → abre conexão TCP na porta 443 da VPS → o Traefik lê o cabeçalho `Host` e encaminha para o serviço cujo router casa com aquele nome.
 
-Verificação: `dig +short devops.seudominio.com.br` deve retornar o IP da VPS.
+Verificação: `nslookup arturdevops.duckdns.org` retorna 31.97.172.33.
 
 ## 10. Configuração do HTTPS
 
-Certificado emitido pelo Let's Encrypt através do resolver ACME do Traefik, usando desafio HTTP-01 na porta 80. A renovação é automática e os certificados ficam no volume `traefik_certs`. Todo acesso HTTP é redirecionado para HTTPS pelo entrypoint `web`.
+Certificado emitido pelo Let's Encrypt através do resolver ACME do Traefik (`certresolver=letsencrypt`), por desafio HTTP-01 na porta 80. A renovação é automática. Todo acesso em HTTP é redirecionado para HTTPS por um middleware próprio da stack (`devops-redirect`), para não interferir nos middlewares das outras aplicações do cluster.
 
-Verificação: `curl -vI https://devops.seudominio.com.br` — o certificado deve ser emitido por Let's Encrypt e estar dentro da validade.
+Verificação: `curl -I https://arturdevops.duckdns.org` retorna `200 OK` com certificado válido.
 
 ## 11. Monitoramento
 
-Uptime Kuma em `status.seudominio.com.br`, com dois monitores HTTP(s) apontando para `/health` da aplicação e para a própria página inicial, checagem a cada 60 segundos e uma status page pública para validação externa.
-
-Camadas de verificação:
+Uptime Kuma publicado em `arturdevopsstatus.duckdns.org`, com dois monitores HTTP(s) a cada 60 segundos — a página inicial e o `/health` — e uma status page pública em `/status/projeto` para validação externa sem precisar de login.
 
 | Pergunta | Onde olhar |
 |---|---|
 | A aplicação está online? | Status page do Uptime Kuma |
-| O servidor está de pé? | `ssh` na VPS, `uptime`, `df -h` |
-| O container está rodando? | `docker compose ps` (coluna STATUS mostra `healthy`) |
-| Como identificar indisponibilidade? | Alerta do Kuma + `docker logs` + roteiro do `RUNBOOK.md` |
+| O servidor está de pé? | Portainer → Dashboard (nós do cluster) |
+| O container está rodando? | Portainer → Services → `projeto-devops_app` (réplicas 2/2) |
+| Como identificar indisponibilidade? | Alerta do Kuma + logs do serviço + roteiro do `RUNBOOK.md` |
 
 ## 12. Segurança
 
-- SSH apenas por chave; login de root e autenticação por senha desabilitados.
-- UFW liberando somente 22, 80 e 443.
-- Aplicação e Uptime Kuma sem portas publicadas no host.
+- Nenhuma porta da aplicação publicada no host: só o Traefik expõe 80 e 443.
 - Container roda como usuário não-root.
-- Nenhuma credencial no código: `.env` está no `.gitignore` (apenas `.env.example` é versionado) e os segredos da pipeline ficam em GitHub Secrets.
-- Painel do Traefik desabilitado.
+- Nenhuma credencial no código: `.env` no `.gitignore`, apenas `.env.example` versionado.
+- Segredos da pipeline em GitHub Secrets (`PORTAINER_WEBHOOK`), nunca no YAML.
+- A URL do webhook é tratada como credencial — quem a possui consegue disparar deploy.
 - HTTPS obrigatório, com redirecionamento automático de HTTP.
-- Socket do Docker montado somente leitura.
-
-Segredos usados na pipeline: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`.
+- Acesso administrativo ao cluster apenas via Portainer autenticado.
+- Imagem pública no GHCR contém somente o código da aplicação, sem segredos embutidos.
 
 ## 13. Procedimentos básicos de recuperação
 
-Roteiro completo de diagnóstico e recuperação em [`RUNBOOK.md`](./RUNBOOK.md).
+Roteiro completo em [`RUNBOOK.md`](./RUNBOOK.md).
 
-Recuperação total do ambiente (servidor novo): instalar Docker → `git clone` → criar `.env` → `docker compose up -d`. Nada além do `.env` e dos volumes precisa ser reconstruído manualmente.
+Recuperação do serviço: `docker service update --force projeto-devops_app` recria as tasks. Recuperação da stack inteira: `docker stack deploy -c stack-swarm.yml projeto-devops`. Recuperação em servidor novo: instalar Docker, inicializar o Swarm, criar a rede `traefik_public`, subir o Traefik e aplicar a stack — tudo a partir do que está versionado neste repositório. O certificado é reemitido automaticamente após o DNS apontar para o novo IP.
