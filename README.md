@@ -353,6 +353,11 @@ ansible-playbook site.yml --tags deploy,validate -e app_image=ghcr.io/artur-lima
 
 ### 14.9 Provisionamento com Terraform (diferencial)
 
+<p align="center">
+  <img src="docs/img/terraforming.png" alt="Carta Terraforming" width="220"><br>
+  <em>Ativa o Terraforming: adiciona 1 VM da Oracle Cloud ao seu campo. 🃏</em>
+</p>
+
 A pasta `terraform/` cria na **Oracle Cloud (OCI)** toda a infraestrutura de que a aplicação precisa e entrega a VM pronta para o Ansible:
 
 ```
