@@ -1,0 +1,30 @@
+---
+# Playbook principal da N2.
+# Servidor Linux novo -> Python -> pacotes/firewall -> Docker -> Swarm
+#   -> deploy da stack (Traefik + app + Uptime Kuma) -> validação HTTP e evidências
+#
+# Execução:  cd ansible && ansible-playbook site.yml
+# Pode ser rodado quantas vezes quiser: é idempotente.
+
+- name: 0. Bootstrap — garantir Python compatível no servidor
+  hosts: app
+  gather_facts: false
+  become: true
+  roles:
+    - role: bootstrap
+      tags: [always] # roda mesmo com --tags, porque as outras roles dependem dele
+
+- name: 1-5. Preparar o servidor e implantar a aplicação
+  hosts: app
+  become: true
+  roles:
+    - role: base
+      tags: [base]
+    - role: docker
+      tags: [docker]
+    - role: swarm
+      tags: [swarm]
+    - role: deploy
+      tags: [deploy]
+    - role: validate
+      tags: [validate]

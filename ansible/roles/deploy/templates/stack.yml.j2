@@ -1,0 +1,125 @@
+# {{ ansible_managed }}
+# Stack gerada pelo Ansible a partir de ansible/roles/deploy/templates/stack.yml.j2
+# Modo: {{ 'HTTPS (' ~ app_domain ~ ')' if app_domain else 'HTTP por IP' }}
+#
+# Mesma arquitetura da N1, mas autossuficiente: num servidor novo não existe
+# Traefik nem rede pronta, então a stack traz o próprio proxy e a própria rede.
+
+services:
+
+  traefik:
+    image: {{ traefik_image }}
+    command:
+      - "--providers.swarm=true"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--providers.swarm.network={{ stack_name }}_web"
+      - "--entrypoints.web.address=:80"
+{% if app_domain %}
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.httpchallenge=true"
+      - "--certificatesresolvers.le.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.le.acme.email={{ acme_email }}"
+      - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+{% endif %}
+      - "--log.level=INFO"
+      - "--accesslog=true"
+    ports:
+      # mode: host -> a porta abre direto no servidor, sem passar pela routing mesh
+      - { target: 80, published: 80, protocol: tcp, mode: host }
+{% if app_domain %}
+      - { target: 443, published: 443, protocol: tcp, mode: host }
+{% endif %}
+    volumes:
+      # Somente leitura: o Traefik só lê os serviços/labels do Swarm
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certs:/letsencrypt
+    networks:
+      - web
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager # precisa do socket do manager para ler o Swarm
+      restart_policy:
+        condition: any
+        delay: 5s
+
+  app:
+    image: {{ app_image }}
+    environment:
+      - TZ={{ timezone }}
+    networks:
+      - web
+    deploy:
+      replicas: {{ app_replicas }}
+      restart_policy:
+        condition: any
+        delay: 5s
+      update_config:
+        order: start-first # sobe a nova antes de derrubar a antiga
+        parallelism: 1
+        delay: 5s
+        failure_action: rollback
+      rollback_config:
+        order: start-first
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.services.app.loadbalancer.server.port={{ app_port }}"
+        - "traefik.http.services.app.loadbalancer.healthcheck.path=/health"
+{% if app_domain %}
+        - "traefik.http.routers.app.rule=Host(`{{ app_domain }}`)"
+        - "traefik.http.routers.app.entrypoints=websecure"
+        - "traefik.http.routers.app.tls.certresolver=le"
+        - "traefik.http.routers.app-http.rule=Host(`{{ app_domain }}`)"
+        - "traefik.http.routers.app-http.entrypoints=web"
+        - "traefik.http.routers.app-http.middlewares=to-https"
+        - "traefik.http.middlewares.to-https.redirectscheme.scheme=https"
+        - "traefik.http.middlewares.to-https.redirectscheme.permanent=true"
+{% else %}
+        - "traefik.http.routers.app.rule=PathPrefix(`/`)"
+        - "traefik.http.routers.app.entrypoints=web"
+{% endif %}
+{% if kuma_enabled %}
+
+  uptime-kuma:
+    image: {{ kuma_image }}
+    environment:
+      - TZ={{ timezone }}
+    volumes:
+      - kuma_data:/app/data
+    networks:
+      - web
+{% if not status_domain %}
+    ports:
+      - { target: 3001, published: {{ kuma_port }}, protocol: tcp, mode: host }
+{% endif %}
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager # volume local: fica sempre no mesmo nó
+      restart_policy:
+        condition: any
+        delay: 10s
+{% if status_domain %}
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.services.kuma.loadbalancer.server.port=3001"
+        - "traefik.http.routers.kuma.rule=Host(`{{ status_domain }}`)"
+        - "traefik.http.routers.kuma.entrypoints=websecure"
+        - "traefik.http.routers.kuma.tls.certresolver=le"
+        - "traefik.http.routers.kuma-http.rule=Host(`{{ status_domain }}`)"
+        - "traefik.http.routers.kuma-http.entrypoints=web"
+        - "traefik.http.routers.kuma-http.middlewares=to-https"
+{% endif %}
+{% endif %}
+
+networks:
+  web:
+    driver: overlay
+
+volumes:
+  traefik_certs:
+{% if kuma_enabled %}
+  kuma_data:
+{% endif %}

@@ -1,0 +1,84 @@
+---
+# Preparação básica do sistema operacional: pacotes, fuso e firewall.
+
+- name: Mostrar sistema detectado
+  ansible.builtin.debug:
+    msg: "{{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} ({{ ansible_facts.os_family }}, {{ ansible_facts.architecture }})"
+
+- name: Recusar sistemas não suportados
+  ansible.builtin.assert:
+    that: ansible_facts.os_family in ['Debian', 'RedHat']
+    fail_msg: "Suportado: família Debian (Ubuntu/Debian) e RedHat (Oracle Linux, Rocky, Alma, CentOS Stream)."
+
+- name: Instalar pacotes básicos (Debian/Ubuntu)
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, gnupg, git, tzdata]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts.os_family == 'Debian'
+
+# No Oracle Linux 8 o Python usado pelo Ansible (3.11) não tem as bibliotecas
+# do dnf, então chamamos o dnf direto. "Nothing to do" = nada mudou.
+- name: Instalar pacotes básicos (Oracle Linux / RHEL)
+  ansible.builtin.command: dnf install -y ca-certificates curl git tar # noqa: command-instead-of-module
+  register: dnf_base
+  changed_when: "'Nothing to do' not in dnf_base.stdout"
+  when: ansible_facts.os_family == 'RedHat'
+
+- name: Ler fuso horário atual
+  ansible.builtin.command: timedatectl show -p Timezone --value
+  register: tz_atual
+  changed_when: false
+  failed_when: false # algumas VMs mínimas não têm timedatectl; não é crítico
+
+- name: Ajustar fuso horário
+  ansible.builtin.command: timedatectl set-timezone {{ timezone }}
+  when: tz_atual.rc == 0 and tz_atual.stdout != timezone
+  changed_when: true
+
+# ---------- Firewall ----------
+# Em vez de desligar o firewall, abrimos só as portas que a stack usa.
+# Feito com o próprio firewall-cmd/ufw para não depender de bibliotecas Python extras.
+
+- name: Levantar serviços do sistema
+  ansible.builtin.service_facts:
+
+- name: Verificar se o firewalld está ativo
+  ansible.builtin.set_fact:
+    firewalld_ativo: "{{ ansible_facts.services['firewalld.service'].state | default('') == 'running' }}"
+
+- name: Conferir portas já liberadas no firewalld
+  ansible.builtin.command: firewall-cmd --permanent --query-port={{ item }}
+  loop: "{{ firewall_ports }}"
+  register: firewalld_query
+  changed_when: false
+  failed_when: false
+  when: firewalld_ativo | bool
+
+- name: Liberar portas no firewalld
+  ansible.builtin.command: firewall-cmd --permanent --add-port={{ item.item }}
+  loop: "{{ firewalld_query.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - firewalld_ativo | bool
+    - item.rc is defined and item.rc != 0
+  changed_when: true
+  notify: Recarregar firewalld
+
+- name: Verificar se o ufw está ativo
+  ansible.builtin.command: ufw status
+  register: ufw_status
+  changed_when: false
+  failed_when: false
+
+- name: Liberar portas no ufw
+  ansible.builtin.command: ufw allow {{ item }}
+  loop: "{{ firewall_ports }}"
+  register: ufw_allow
+  changed_when: "'Skipping' not in ufw_allow.stdout"
+  when: 'ufw_status.rc == 0 and "Status: active" in ufw_status.stdout'
+
+- name: Aplicar regras de firewall agora (antes de instalar o Docker)
+  ansible.builtin.meta: flush_handlers

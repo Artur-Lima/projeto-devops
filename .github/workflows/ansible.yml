@@ -1,0 +1,85 @@
+name: Ansible
+
+on:
+  push:
+    branches: [main]
+    paths: ["ansible/**", ".ansible-lint", ".github/workflows/ansible.yml"]
+  pull_request:
+    paths: ["ansible/**"]
+  # Execução manual: Actions -> Ansible -> Run workflow -> informar IP e usuário
+  workflow_dispatch:
+    inputs:
+      host:
+        description: "IP do servidor Linux de destino"
+        required: true
+      user:
+        description: "Usuário SSH com sudo (ubuntu, opc, debian...)"
+        required: true
+        default: ubuntu
+
+jobs:
+  # 1) Qualidade do código de infraestrutura — roda em todo push
+  lint:
+    name: Lint e sintaxe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Ansible
+        run: pip install ansible-core ansible-lint
+
+      - name: Checagem de sintaxe
+        working-directory: ansible
+        run: ansible-playbook site.yml --syntax-check
+
+      - name: ansible-lint (perfil production)
+        run: ansible-lint --offline ansible/
+
+  # 2) Execução real do playbook — só quando disparado manualmente
+  deploy:
+    name: Executar playbook no servidor
+    if: github.event_name == 'workflow_dispatch'
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Ansible
+        run: pip install ansible-core
+
+      - name: Configurar chave SSH (secret ANSIBLE_SSH_KEY)
+        env:
+          SSH_KEY: ${{ secrets.ANSIBLE_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: Gerar inventário com o servidor informado
+        working-directory: ansible
+        env: # inputs via env, nunca interpolados direto no script
+          HOST: ${{ inputs.host }}
+          SSH_USER: ${{ inputs.user }}
+        run: |
+          printf '[app]\nservidor-n2 ansible_host=%s ansible_user=%s ansible_ssh_private_key_file=~/.ssh/id_ed25519\n' \
+            "$HOST" "$SSH_USER" > inventory.ini
+          cat inventory.ini
+
+      - name: Rodar o playbook
+        working-directory: ansible
+        run: ansible-playbook site.yml | tee ../evidencias/ansible-run-actions.log
+
+      - name: Rodar de novo (prova de idempotência — esperado changed=0)
+        working-directory: ansible
+        run: ansible-playbook site.yml | tee ../evidencias/ansible-run-actions-2.log
+
+      - name: Publicar evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-ansible
+          path: evidencias/

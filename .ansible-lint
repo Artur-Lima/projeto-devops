@@ -1,0 +1,8 @@
+# Configuração do ansible-lint (rodado pela pipeline em todo push).
+profile: production
+exclude_paths:
+  - .github/
+skip_list:
+  # Nomes de variáveis em português e curtos (health_local, estado...) são
+  # mais fáceis de ler na defesa do que prefixos por role (validate_health_local).
+  - var-naming[no-role-prefix]

@@ -1,0 +1,76 @@
+---
+# Prova de que funcionou: acesso HTTP real + estado do Docker/Swarm,
+# salvos num arquivo de evidência dentro do repositório (pasta evidencias/).
+
+- name: Definir URL de validação
+  ansible.builtin.set_fact:
+    app_url: "{{ ('https://' ~ app_domain) if app_domain else ('http://' ~ ansible_host) }}"
+
+- name: Definir URL do Uptime Kuma
+  ansible.builtin.set_fact:
+    status_url: >-
+      {{ ('https://' ~ status_domain) if status_domain
+         else (('http://' ~ ansible_host ~ ':' ~ kuma_port) if kuma_enabled else 'desativado') }}
+
+- name: Testar /health dentro do servidor (via Traefik na porta 80)
+  ansible.builtin.uri:
+    url: http://127.0.0.1/health
+    headers:
+      Host: "{{ app_domain if app_domain else 'localhost' }}"
+    follow_redirects: none
+    status_code: [200, 301, 308]
+    return_content: true
+  register: health_local
+  until: health_local.status in [200, 301, 308]
+  retries: 30
+  delay: 5
+
+- name: Testar a aplicação a partir da máquina que rodou o Ansible
+  ansible.builtin.uri:
+    url: "{{ app_url }}/health"
+    return_content: true
+    validate_certs: "{{ app_domain | length > 0 }}"
+  register: health_externo
+  until: health_externo.status == 200
+  retries: 30
+  delay: 5
+  delegate_to: localhost
+  become: false
+  when: validate_from_control_node | bool
+
+- name: Coletar estado do ambiente
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - docker version --format 'Client {% raw %}{{.Client.Version}} | Server {{.Server.Version}}{% endraw %}'
+    - docker node ls
+    - docker stack ls
+    - docker stack services {{ stack_name }}
+    - docker stack ps {{ stack_name }} --filter desired-state=running
+    - docker ps --format 'table {% raw %}{{.Names}}\t{{.Image}}\t{{.Status}}{% endraw %}'
+  register: estado
+  changed_when: false
+
+- name: Garantir a pasta de evidências no control node
+  ansible.builtin.file:
+    path: "{{ evidence_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  become: false
+
+- name: Gravar arquivo de evidência no repositório
+  ansible.builtin.template:
+    src: evidencia.md.j2
+    dest: "{{ evidence_dir }}/deploy-{{ inventory_hostname }}.md"
+    mode: "0644"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Resultado
+  ansible.builtin.debug:
+    msg:
+      - "Aplicação: {{ app_url }}/"
+      - "Health:    {{ app_url }}/health -> {{ (health_externo.content | default(health_local.content)) | trim }}"
+      - "Status:    {{ status_url }}"
+      - "Evidência: evidencias/deploy-{{ inventory_hostname }}.md"

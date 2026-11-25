@@ -1,0 +1,41 @@
+---
+# Variáveis do projeto. Tudo que muda de um ambiente para outro fica aqui,
+# e não espalhado pelas tasks.
+
+# ---------- Aplicação ----------
+stack_name: projeto-devops
+stack_dir: /opt/projeto-devops
+
+# Imagem publicada pela pipeline da N1 no GHCR (pública).
+# Para fixar uma versão, use a tag do commit: ghcr.io/artur-lima/projeto-devops:<sha>
+app_image: ghcr.io/artur-lima/projeto-devops:latest
+app_replicas: 2
+app_port: 8000 # porta interna do gunicorn no container
+
+# ---------- Proxy ----------
+# v3.6+ é obrigatório com Docker Engine 29 (versões anteriores do Traefik
+# usam a API 1.24 do Docker, que o Engine 29 recusa).
+traefik_image: traefik:v3.6
+
+# ---------- HTTP x HTTPS ----------
+# Vazio  -> modo HTTP: a aplicação responde em http://IP_DO_SERVIDOR/
+# Com domínio -> modo HTTPS: certificado Let's Encrypt e redirect de HTTP para HTTPS.
+#                (o DNS do domínio precisa apontar para o IP do servidor antes)
+app_domain: ""
+status_domain: ""
+acme_email: ""
+
+# ---------- Monitoramento ----------
+kuma_enabled: true
+kuma_image: louislam/uptime-kuma:1
+kuma_port: 3001 # publicada direto no host quando não há status_domain
+
+# ---------- Servidor ----------
+timezone: America/Porto_Velho
+docker_users: ["{{ ansible_user }}"] # usuários adicionados ao grupo docker
+firewall_ports: ["80/tcp", "443/tcp", "{{ kuma_port }}/tcp"]
+
+# ---------- Validação ----------
+# Testa o acesso HTTP também a partir da máquina que roda o Ansible.
+validate_from_control_node: true
+evidence_dir: "{{ playbook_dir }}/../evidencias"

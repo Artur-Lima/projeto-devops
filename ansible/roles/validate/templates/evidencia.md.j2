@@ -1,0 +1,39 @@
+# Evidência de deploy — {{ inventory_hostname }}
+
+Gerado automaticamente pelo Ansible (`ansible/roles/validate`).
+
+| Item | Valor |
+|---|---|
+| Data | {{ ansible_facts.date_time.iso8601 }} |
+| Servidor | {{ ansible_host }} |
+| Sistema | {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }} ({{ ansible_facts.architecture }}) |
+| Python usado pelo Ansible | {{ ansible_python_interpreter }} |
+| Imagem da aplicação | `{{ app_image }}` |
+| URL | {{ app_url }}/ |
+
+## Resposta do /health
+
+Dentro do servidor (`http://127.0.0.1/health`), HTTP {{ health_local.status }}:
+
+```
+{{ health_local.content | default('') | trim }}
+```
+
+{% if health_externo is defined and health_externo.status is defined %}
+A partir da máquina que executou o Ansible (`{{ app_url }}/health`), HTTP {{ health_externo.status }}:
+
+```
+{{ health_externo.content | trim }}
+```
+{% endif %}
+
+## Estado do Docker e da stack
+
+{% for r in estado.results %}
+### `{{ r.item }}`
+
+```
+{{ r.stdout }}
+```
+
+{% endfor %}

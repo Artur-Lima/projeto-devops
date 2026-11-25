@@ -1,0 +1,68 @@
+---
+# Gera o arquivo da stack a partir das variáveis e faz o deploy no Swarm.
+
+- name: Validar combinação de variáveis
+  ansible.builtin.assert:
+    that:
+      - not app_domain or acme_email | length > 0
+      - not status_domain or app_domain | length > 0
+    fail_msg: "Com app_domain é preciso acme_email; status_domain só funciona junto com app_domain."
+    quiet: true
+
+- name: Criar pasta da stack no servidor
+  ansible.builtin.file:
+    path: "{{ stack_dir }}"
+    state: directory
+    mode: "0750"
+
+- name: Gerar stack.yml a partir do template
+  ansible.builtin.template:
+    src: stack.yml.j2
+    dest: "{{ stack_dir }}/stack.yml"
+    mode: "0640"
+
+# docker stack deploy sempre imprime "Updating service", mesmo sem mudança.
+# Para o Ansible reportar "changed" só quando algo mudou de verdade, comparamos
+# a especificação dos serviços (inclui o digest da imagem) antes e depois.
+- name: Capturar especificação atual dos serviços
+  ansible.builtin.shell: &spec_hash |
+    set -o pipefail
+    docker service ls -q --filter label=com.docker.stack.namespace={{ stack_name }} \
+      | sort \
+      | xargs -r docker service inspect --format '{% raw %}{{json .Spec}}{% endraw %}' \
+      | sha256sum
+  args:
+    executable: /bin/bash
+  register: spec_antes
+  changed_when: false
+
+- name: Deploy da stack no Swarm (puxa a imagem mais recente da tag)
+  ansible.builtin.command: >
+    docker stack deploy
+    --compose-file {{ stack_dir }}/stack.yml
+    --resolve-image always
+    --prune
+    --detach=true
+    {{ stack_name }}
+  register: stack_deploy
+  changed_when: false
+
+- name: Capturar especificação depois do deploy
+  ansible.builtin.shell: *spec_hash
+  args:
+    executable: /bin/bash
+  register: spec_depois
+  changed_when: spec_antes.stdout != spec_depois.stdout
+
+- name: Aguardar todas as réplicas ficarem prontas
+  ansible.builtin.shell: |
+    set -o pipefail
+    docker stack services {{ stack_name }} --format '{% raw %}{{.Name}} {{.Replicas}}{% endraw %}' \
+      | awk '{print} {split($2, r, "/")} r[1] != r[2] {pendente=1} END {exit pendente}'
+  args:
+    executable: /bin/bash
+  register: replicas_ok
+  until: replicas_ok.rc == 0
+  retries: 40
+  delay: 6
+  changed_when: false

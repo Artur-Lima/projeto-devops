@@ -1,0 +1,85 @@
+---
+# Instala o Docker Engine pelo repositório oficial da Docker (não o pacote
+# da distribuição, que costuma vir desatualizado e sem o plugin compose).
+
+- name: Mapear arquitetura para o nome usado pelo repositório
+  ansible.builtin.set_fact:
+    docker_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] | default(ansible_facts.architecture) }}"
+
+# ---------- Debian / Ubuntu ----------
+- name: Instalação no Debian/Ubuntu
+  when: ansible_facts.os_family == 'Debian'
+  block:
+    - name: Remover pacotes conflitantes da distribuição
+      ansible.builtin.apt:
+        name: [docker.io, docker-compose, docker-doc, podman-docker, containerd, runc]
+        state: absent
+
+    - name: Criar pasta de chaves do apt
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Baixar a chave GPG oficial da Docker
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Adicionar o repositório oficial da Docker
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.list
+        content: >
+          deb [arch={{ docker_arch }} signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}
+          {{ ansible_facts.distribution_release }} stable
+        mode: "0644"
+
+    - name: Instalar Docker Engine e plugins
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+        state: present
+        update_cache: true
+
+# ---------- Oracle Linux / RHEL / Rocky / Alma ----------
+- name: Instalação no Oracle Linux/RHEL
+  when: ansible_facts.os_family == 'RedHat'
+  block:
+    - name: Adicionar o repositório oficial da Docker
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/docker-ce.repo
+        mode: "0644"
+
+    # dnf direto pelo mesmo motivo da role base (Python 3.11 sem bindings do dnf no OL8).
+    # --allowerasing remove podman/buildah, que conflitam com o Docker.
+    - name: Instalar Docker Engine e plugins
+      ansible.builtin.command: >- # noqa: command-instead-of-module
+        dnf install -y --allowerasing
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      register: dnf_docker
+      changed_when: "'Nothing to do' not in dnf_docker.stdout"
+
+# ---------- Comum ----------
+- name: Habilitar e iniciar o Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Adicionar usuários ao grupo docker (usar docker sem sudo)
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"
+
+- name: Conferir versão instalada
+  ansible.builtin.command: docker version --format '{% raw %}{{.Server.Version}}{% endraw %}'
+  register: docker_version
+  changed_when: false
+
+- name: Mostrar versão do Docker
+  ansible.builtin.debug:
+    msg: "Docker Engine {{ docker_version.stdout }}"
