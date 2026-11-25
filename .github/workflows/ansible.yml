@@ -39,7 +39,57 @@ jobs:
       - name: ansible-lint (perfil production)
         run: ansible-lint --offline ansible/
 
-  # 2) Execução real do playbook — só quando disparado manualmente
+  # 2) Teste de ponta a ponta numa VM Linux limpa (o próprio runner do GitHub).
+  #    Remove o Docker que vem no runner, roda o playbook contra a própria VM
+  #    e roda de novo para provar a idempotência. Valida instalação do Docker,
+  #    Swarm, pull da imagem no GHCR, Traefik e acesso HTTP de verdade.
+  teste-vm-limpa:
+    name: Teste em VM limpa
+    if: github.event_name != 'workflow_dispatch'
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deixar a VM "nova" (remover Docker pré-instalado do runner)
+        run: |
+          sudo systemctl stop docker.socket docker containerd 2>/dev/null || true
+          sudo apt-get purge -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin \
+            docker-compose-plugin moby-engine moby-cli moby-containerd moby-runc 2>/dev/null || true
+          sudo rm -rf /etc/apt/sources.list.d/docker* /etc/apt/keyrings/docker* \
+            /usr/share/keyrings/docker* /var/lib/docker /etc/docker
+          ! command -v docker || docker --version
+
+      - name: Instalar Ansible
+        run: pipx install ansible-core
+
+      - name: Inventário apontando para a própria VM
+        working-directory: ansible
+        run: printf '[app]\nvm-limpa ansible_host=127.0.0.1 ansible_connection=local ansible_user=%s\n' "$USER" > inventory.ini
+
+      - name: 1ª execução do playbook
+        working-directory: ansible
+        run: ansible-playbook site.yml | tee ../evidencias/ansible-run.log
+
+      - name: 2ª execução (idempotência — exige changed=0)
+        working-directory: ansible
+        run: |
+          ansible-playbook site.yml | tee ../evidencias/ansible-run-2.log
+          grep -Eq 'changed=0 +unreachable=0 +failed=0' ../evidencias/ansible-run-2.log
+
+      - name: Aplicação respondendo por HTTP
+        run: |
+          curl -fsS http://127.0.0.1/health
+          curl -fsS -o /dev/null -w 'Página inicial: HTTP %{http_code}\n' http://127.0.0.1/
+
+      - name: Publicar evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidencias-vm-limpa
+          path: evidencias/
+
+  # 3) Execução real do playbook — só quando disparado manualmente
   deploy:
     name: Executar playbook no servidor
     if: github.event_name == 'workflow_dispatch'
