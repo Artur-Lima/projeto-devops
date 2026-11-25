@@ -7,6 +7,7 @@ app = Flask(__name__)
 INTEGRANTES = [
     "Super Choque (Artur Lima da Silva)",
     "Thiago Emanuel",
+    "Israel Carvalho",
 ]
 
 DISCIPLINA = "Cloud Computing e DevOps"
