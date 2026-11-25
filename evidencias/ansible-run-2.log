@@ -1,0 +1,188 @@
+PLAY [0. Bootstrap — garantir Python compatível no servidor] *******************
+
+TASK [bootstrap : Localizar (ou instalar) um Python >= 3.8] ********************
+ok: [vm-limpa]
+
+TASK [bootstrap : Usar esse Python no restante do playbook] ********************
+ok: [vm-limpa]
+
+TASK [bootstrap : Mostrar interpretador escolhido] *****************************
+ok: [vm-limpa] => 
+    msg: 'Python no servidor: /usr/bin/python3'
+
+PLAY [1-5. Preparar o servidor e implantar a aplicação] ************************
+
+TASK [Gathering Facts] *********************************************************
+ok: [vm-limpa]
+
+TASK [base : Mostrar sistema detectado] ****************************************
+ok: [vm-limpa] => 
+    msg: Ubuntu 24.04 (Debian, x86_64)
+
+TASK [base : Recusar sistemas não suportados] **********************************
+ok: [vm-limpa] => 
+    changed: false
+    msg: All assertions passed
+
+TASK [base : Instalar pacotes básicos (Debian/Ubuntu)] *************************
+ok: [vm-limpa]
+
+TASK [base : Instalar pacotes básicos (Oracle Linux / RHEL)] *******************
+skipping: [vm-limpa]
+
+TASK [base : Ler fuso horário atual] *******************************************
+ok: [vm-limpa]
+
+TASK [base : Ajustar fuso horário] *********************************************
+skipping: [vm-limpa]
+
+TASK [base : Levantar serviços do sistema] *************************************
+ok: [vm-limpa]
+
+TASK [base : Verificar se o firewalld está ativo] ******************************
+ok: [vm-limpa]
+
+TASK [base : Conferir portas já liberadas no firewalld] ************************
+skipping: [vm-limpa] => (item=80/tcp) 
+skipping: [vm-limpa] => (item=443/tcp) 
+skipping: [vm-limpa] => (item=3001/tcp) 
+skipping: [vm-limpa]
+
+TASK [base : Liberar portas no firewalld] **************************************
+skipping: [vm-limpa] => (item=80/tcp) 
+skipping: [vm-limpa] => (item=443/tcp) 
+skipping: [vm-limpa] => (item=3001/tcp) 
+skipping: [vm-limpa]
+
+TASK [base : Verificar se o ufw está ativo] ************************************
+ok: [vm-limpa]
+
+TASK [base : Liberar portas no ufw] ********************************************
+skipping: [vm-limpa] => (item=80/tcp) 
+skipping: [vm-limpa] => (item=443/tcp) 
+skipping: [vm-limpa] => (item=3001/tcp) 
+skipping: [vm-limpa]
+
+TASK [base : Aplicar regras de firewall agora (antes de instalar o Docker)] ****
+
+TASK [docker : Mapear arquitetura para o nome usado pelo repositório] **********
+ok: [vm-limpa]
+
+TASK [docker : Remover pacotes conflitantes da distribuição] *******************
+ok: [vm-limpa]
+
+TASK [docker : Criar pasta de chaves do apt] ***********************************
+ok: [vm-limpa]
+
+TASK [docker : Baixar a chave GPG oficial da Docker] ***************************
+ok: [vm-limpa]
+
+TASK [docker : Adicionar o repositório oficial da Docker] **********************
+ok: [vm-limpa]
+
+TASK [docker : Instalar Docker Engine e plugins] *******************************
+ok: [vm-limpa]
+
+TASK [docker : Adicionar o repositório oficial da Docker] **********************
+skipping: [vm-limpa]
+
+TASK [docker : Instalar Docker Engine e plugins] *******************************
+skipping: [vm-limpa]
+
+TASK [docker : Habilitar e iniciar o Docker] ***********************************
+ok: [vm-limpa]
+
+TASK [docker : Adicionar usuários ao grupo docker (usar docker sem sudo)] ******
+[WARNING]: Deprecation warnings can be disabled by setting `deprecation_warnings=False` in ansible.cfg.
+[DEPRECATION WARNING]: INJECT_FACTS_AS_VARS default to `True` is deprecated, top-level facts will not be auto injected after the change. This feature will be removed from ansible-core version 2.24.
+Origin: /home/runner/work/projeto-devops/projeto-devops/ansible/group_vars/all.yml:37:16
+
+35 # Usuários adicionados ao grupo docker. Se o inventário não tiver ansible_user,
+36 # usa quem fez o sudo (SUDO_USER) — funciona com o inventário de quem for rodar.
+37 docker_users: ["{{ ansible_user | default(ansible_env.SUDO_USER | default('root')) }}"]
+                  ^ column 16
+
+Use `ansible_facts["fact_name"]` (no `ansible_` prefix) instead.
+
+ok: [vm-limpa] => (item=runner)
+
+TASK [docker : Conferir versão instalada] **************************************
+ok: [vm-limpa]
+
+TASK [docker : Mostrar versão do Docker] ***************************************
+ok: [vm-limpa] => 
+    msg: Docker Engine 29.10.1
+
+TASK [swarm : Verificar estado do Swarm] ***************************************
+ok: [vm-limpa]
+
+TASK [swarm : Inicializar o Swarm (só se ainda não estiver ativo)] *************
+skipping: [vm-limpa]
+
+TASK [swarm : Listar nós do cluster] *******************************************
+ok: [vm-limpa]
+
+TASK [swarm : Mostrar nós do cluster] ******************************************
+ok: [vm-limpa] => 
+    swarm_nodes.stdout_lines:
+    - ID                            HOSTNAME        STATUS    AVAILABILITY   MANAGER STATUS   ENGINE
+        VERSION
+    - 2cmc6ebek6t5netv9hgnearso *   ip-10-0-131-2   Ready     Active         Leader           29.10.1
+
+TASK [deploy : Validar combinação de variáveis] ********************************
+ok: [vm-limpa]
+
+TASK [deploy : Criar pasta da stack no servidor] *******************************
+ok: [vm-limpa]
+
+TASK [deploy : Gerar stack.yml a partir do template] ***************************
+ok: [vm-limpa]
+
+TASK [deploy : Capturar especificação atual dos serviços] **********************
+ok: [vm-limpa]
+
+TASK [deploy : Deploy da stack no Swarm (puxa a imagem mais recente da tag)] ***
+ok: [vm-limpa]
+
+TASK [deploy : Capturar especificação depois do deploy] ************************
+ok: [vm-limpa]
+
+TASK [deploy : Aguardar todas as réplicas ficarem prontas] *********************
+ok: [vm-limpa]
+
+TASK [validate : Definir URL de validação] *************************************
+ok: [vm-limpa]
+
+TASK [validate : Definir URL do Uptime Kuma] ***********************************
+ok: [vm-limpa]
+
+TASK [validate : Testar /health dentro do servidor (via Traefik na porta 80)] ***
+ok: [vm-limpa]
+
+TASK [validate : Testar a aplicação a partir da máquina que rodou o Ansible] ***
+ok: [vm-limpa -> localhost]
+
+TASK [validate : Coletar estado do ambiente] ***********************************
+ok: [vm-limpa] => (item=docker version --format 'Client {{.Client.Version}} | Server {{.Server.Version}}')
+ok: [vm-limpa] => (item=docker node ls)
+ok: [vm-limpa] => (item=docker stack ls)
+ok: [vm-limpa] => (item=docker stack services projeto-devops)
+ok: [vm-limpa] => (item=docker stack ps projeto-devops --filter desired-state=running)
+ok: [vm-limpa] => (item=docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}')
+
+TASK [validate : Garantir a pasta de evidências no control node] ***************
+ok: [vm-limpa -> localhost]
+
+TASK [validate : Gravar arquivo de evidência no repositório] *******************
+ok: [vm-limpa -> localhost]
+
+TASK [validate : Resultado] ****************************************************
+ok: [vm-limpa] => 
+    msg:
+    - 'Aplicação: http://127.0.0.1/'
+    - 'Health:    http://127.0.0.1/health -> {"build":"25/11/2026 04:37 UTC","commit":"712a258","status":"ok"}'
+    - 'Status:    http://127.0.0.1:3001'
+    - 'Evidência: evidencias/deploy-vm-limpa.md'
+
+PLAY RECAP *********************************************************************
+vm-limpa                   : ok=39   changed=0    unreachable=0    failed=0    skipped=8    rescued=0    ignored=0

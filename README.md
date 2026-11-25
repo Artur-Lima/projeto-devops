@@ -320,14 +320,16 @@ ansible-playbook site.yml --tags deploy,validate -e app_image=ghcr.io/artur-lima
 `.github/workflows/ansible.yml`:
 
 - **Em todo push que altera `ansible/`:** checagem de sintaxe e `ansible-lint` no perfil `production`. Código de infraestrutura passa pelo mesmo controle de qualidade do código da aplicação.
+- **Teste em VM limpa (a cada push):** o runner Ubuntu do GitHub tem o Docker removido e vira o "servidor novo"; o playbook roda contra ele duas vezes (a segunda precisa dar `changed=0`) e a aplicação é testada por HTTP. É a prova contínua de que a automação reproduz o ambiente do zero.
 - **Execução manual** (Actions → Ansible → Run workflow, informando IP e usuário): roda o playbook a partir do GitHub contra o servidor, roda de novo para provar a idempotência e publica a pasta `evidencias/` como artefato. A chave SSH fica no secret `ANSIBLE_SSH_KEY`.
 
 ### 14.7 Evidências
 
 | Evidência | Onde |
 |---|---|
-| Saída completa do Ansible | `evidencias/ansible-run.log` |
+| Saída completa do Ansible (VM Ubuntu limpa) | `evidencias/ansible-run.log` |
 | Segunda execução (idempotência, `changed=0`) | `evidencias/ansible-run-2.log` |
+| Acesso HTTP (`/health` e página inicial) | `evidencias/http-check.log` |
 | Estado do Docker, Swarm, stack e resposta do `/health` | `evidencias/deploy-<servidor>.md` (gerado pelo playbook) |
 | Lint e execuções pelo GitHub | aba Actions → workflow **Ansible** |
 

@@ -69,11 +69,14 @@ jobs:
 
       - name: 1ª execução do playbook
         working-directory: ansible
-        run: ansible-playbook site.yml | tee ../evidencias/ansible-run.log
+        run: |
+          set -o pipefail
+          ansible-playbook site.yml | tee ../evidencias/ansible-run.log
 
       - name: 2ª execução (idempotência — exige changed=0)
         working-directory: ansible
         run: |
+          set -o pipefail
           ansible-playbook site.yml | tee ../evidencias/ansible-run-2.log
           grep -Eq 'changed=0 +unreachable=0 +failed=0' ../evidencias/ansible-run-2.log
 
@@ -81,6 +84,10 @@ jobs:
         run: |
           curl -fsS http://127.0.0.1/health
           curl -fsS -o /dev/null -w 'Página inicial: HTTP %{http_code}\n' http://127.0.0.1/
+
+      - name: Estado do Docker e da stack (evidência gerada pelo playbook)
+        if: always()
+        run: cat evidencias/deploy-*.md
 
       - name: Publicar evidências
         if: always()

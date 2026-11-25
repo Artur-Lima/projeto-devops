@@ -1,0 +1,4 @@
+curl -fsS http://127.0.0.1/health
+curl -fsS -o /dev/null -w 'Página inicial: HTTP %{http_code}\n' http://127.0.0.1/
+{"build":"25/11/2026 04:37 UTC","commit":"712a258","status":"ok"}
+Página inicial: HTTP 200
