@@ -32,7 +32,9 @@ kuma_port: 3001 # publicada direto no host quando não há status_domain
 
 # ---------- Servidor ----------
 timezone: America/Porto_Velho
-docker_users: ["{{ ansible_user }}"] # usuários adicionados ao grupo docker
+# Usuários adicionados ao grupo docker. Se o inventário não tiver ansible_user,
+# usa quem fez o sudo (SUDO_USER) — funciona com o inventário de quem for rodar.
+docker_users: ["{{ ansible_user | default(ansible_env.SUDO_USER | default('root')) }}"]
 firewall_ports: ["80/tcp", "443/tcp", "{{ kuma_port }}/tcp"]
 
 # ---------- Validação ----------
