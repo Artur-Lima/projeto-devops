@@ -4,9 +4,9 @@ from flask import Flask, jsonify, render_template
 
 app = Flask(__name__)
 
-# TODO: coloque aqui o nome completo de TODOS os integrantes do grupo.
 INTEGRANTES = [
     "Super Choque (Artur Lima da Silva)",
+    "Thiago Emanuel",
 ]
 
 DISCIPLINA = "Cloud Computing e DevOps"

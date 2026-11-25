@@ -2,6 +2,8 @@
 
 Aplicação web containerizada, publicada em cluster Docker Swarm, com domínio próprio, HTTPS válido, pipeline de CI/CD automatizada e monitoramento de disponibilidade.
 
+**Integrantes:** Artur Lima da Silva e Thiago Emanuel
+
 **N2:** o ambiente inteiro é reproduzível com Ansible em qualquer servidor Linux novo — ver [seção 14](#14-automação-com-ansible-n2).
 
 | Recurso | Endereço |
