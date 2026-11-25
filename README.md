@@ -74,6 +74,7 @@ Componentes:
 | CI/CD | GitHub Actions + webhook de serviço do Portainer |
 | Monitoramento | Uptime Kuma com status page pública |
 | Automação de infraestrutura (N2) | Ansible (ansible-core, apenas módulos builtin) + ansible-lint |
+| Provisionamento (N2, diferencial) | Terraform com provider `oracle/oci` |
 
 ## 4. Estrutura do projeto
 
@@ -90,11 +91,13 @@ Componentes:
 ├── .gitignore
 ├── RUNBOOK.md                  # Diagnóstico e recuperação
 ├── ansible/                    # N2 — automação do servidor e do deploy (seção 14)
+├── terraform/                  # N2 — provisionamento da VM na Oracle Cloud (seção 14.9)
 ├── evidencias/                 # N2 — evidências geradas pelo Ansible
 ├── .ansible-lint               # Regras de qualidade do código Ansible
 └── .github/workflows/
     ├── ci-cd.yml               # Pipeline da aplicação (teste → build → deploy)
-    └── ansible.yml             # Pipeline do Ansible (lint + execução manual)
+    ├── ansible.yml             # Pipeline do Ansible (lint + teste em VM limpa + execução manual)
+    └── terraform.yml           # Pipeline do Terraform (fmt + validate)
 ```
 
 ## 5. Ambiente Cloud
@@ -218,7 +221,10 @@ Servidor Linux novo ──► Ansible ──► Python ──► pacotes + firew
                                    ──► validação HTTP ──► evidências em evidencias/
 ```
 
-Terraform não foi usado (opcional no enunciado): o servidor de destino é fornecido pronto e o Ansible cuida de tudo a partir do SSH.
+O fluxo funciona de dois jeitos, como o enunciado prevê:
+
+- **Com Terraform (diferencial):** `terraform apply` cria rede, firewall e VM na Oracle Cloud e gera o inventário → Ansible → aplicação no ar (seção 14.9).
+- **Sem Terraform:** servidor Linux já disponível → IP no `inventory.ini` → Ansible → aplicação no ar.
 
 ### 14.1 Estrutura
 
@@ -344,3 +350,47 @@ ansible-playbook site.yml --tags deploy,validate -e app_image=ghcr.io/artur-lima
 | Playbook ok, mas o navegador não abre | porta 80 fechada no provedor | liberar 80/3001 na security list / security group |
 | Réplicas não ficam prontas | imagem inacessível ou app quebrando | `docker service ps projeto-devops_app --no-trunc` |
 | 404 do Traefik | router não casou | `docker service logs projeto-devops_traefik` |
+
+### 14.9 Provisionamento com Terraform (diferencial)
+
+A pasta `terraform/` cria na **Oracle Cloud (OCI)** toda a infraestrutura de que a aplicação precisa e entrega a VM pronta para o Ansible:
+
+```
+terraform apply ──► VCN + internet gateway + rota ──► security list (22, 80, 443, 3001)
+                ──► VM Oracle Linux 9 com a sua chave SSH
+                ──► ansible/inventory.terraform.ini gerado com o IP da VM
+ansible-playbook -i inventory.terraform.ini site.yml ──► Docker ──► Swarm ──► stack ──► HTTP
+```
+
+| Arquivo | Responsabilidade |
+|---|---|
+| `versions.tf` | Versão do Terraform e providers (`oracle/oci`, `hashicorp/local`) |
+| `variables.tf` | Credenciais, região, shape, sistema e portas — com valores padrão Always Free |
+| `network.tf` | VCN, internet gateway, tabela de rotas, security list e subnet pública |
+| `compute.tf` | Imagem mais recente do sistema e a VM (shape Flex ou fixo) |
+| `inventory.tf` | Ponte com o Ansible: grava `ansible/inventory.terraform.ini` com IP e usuário |
+| `outputs.tf` | IP público, comando SSH, próximo passo e URL da aplicação |
+| `terraform.tfvars.example` | Modelo das variáveis (o `terraform.tfvars` real não é versionado) |
+
+**Execução:**
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # preencher com os dados da API key da OCI
+terraform init
+terraform plan
+terraform apply
+
+cd ../ansible
+ansible-playbook -i inventory.terraform.ini site.yml
+```
+
+Para remover tudo que foi criado: `terraform destroy`.
+
+**Decisões:**
+
+- **Always Free por padrão:** `VM.Standard.A1.Flex` (ARM, 1 OCPU / 6 GB). Se a região estiver sem capacidade, `shape = "VM.Standard.E2.1.Micro"` também é gratuito. O Ansible já trata as duas arquiteturas.
+- **Oracle Linux 9 por padrão**, como no material da disciplina; `sistema = "Canonical Ubuntu"` também funciona, e o usuário SSH do inventário (`opc` ou `ubuntu`) é escolhido automaticamente.
+- **Firewall em duas camadas:** a security list da OCI (Terraform) e o firewalld/ufw do sistema (Ansible) liberam só as portas da stack. `origem_ssh` permite restringir o SSH ao IP de quem administra.
+- **Segredos fora do Git:** `terraform.tfvars`, chaves `.pem`, arquivos de estado (`*.tfstate`) e o inventário gerado estão no `.gitignore`.
+- **Qualidade contínua:** o workflow `Terraform` roda `terraform fmt -check` e `terraform validate` a cada alteração na pasta.

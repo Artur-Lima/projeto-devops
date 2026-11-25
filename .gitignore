@@ -13,3 +13,12 @@ venv/
 
 # Sistema
 .DS_Store
+
+# Terraform — estado e credenciais nunca vão para o Git
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log
+# Inventário gerado pelo Terraform (contém o IP da VM criada)
+ansible/inventory.terraform.ini

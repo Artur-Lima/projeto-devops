@@ -1,0 +1,29 @@
+name: Terraform
+
+on:
+  push:
+    branches: [main]
+    paths: ["terraform/**", ".github/workflows/terraform.yml"]
+  pull_request:
+    paths: ["terraform/**"]
+
+jobs:
+  validar:
+    name: Formato e validação
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: terraform fmt (padrão de formatação)
+        run: terraform fmt -check -diff -recursive
+
+      - name: terraform init (sem backend, sem credenciais)
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate
